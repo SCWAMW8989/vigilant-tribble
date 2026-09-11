@@ -3,7 +3,7 @@
 # Compatible with start_comfyui.sh-GPU-aware-v3.7.sh.
 #
 # Build example:
-#   docker build -f Dockerfile.qwen-image-edit-runpod-v3.7.Dockerfile \
+#   docker build -f Dockerfile.qwen-image-edit-runpod-v3.7.dockerfile \
 #     -t your-registry/qwen-image-edit:runpod-v3.7 .
 #
 # RunPod configuration:
