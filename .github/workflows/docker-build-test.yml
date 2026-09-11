@@ -12,6 +12,9 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
+      - name: List files
+        run: ls -la
+
       - name: Build Dockerfile
         run: |
           docker build -f Dockerfile.qwen-image-edit-runpod-v3.7.dockerfile -t qwen-edit-test .
