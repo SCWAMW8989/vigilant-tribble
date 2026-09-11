@@ -34,19 +34,19 @@ GPU_PROFILE="${QWEN_GPU_PROFILE:-rtx-pro-4000}"
 
 case "$GPU_PROFILE" in
 rtx-pro-4000)
-# 24 GB GDDR7, Blackwell — same VRAM budget as RTX 3090
+# 24 GB GDDR7, Blackwell -- same VRAM budget as RTX 3090
 DEFAULT_QUANT="q4_k_m"
 DEFAULT_LOWVRAM="0"
 DEFAULT_RES="1024x1024"
 ;;
 a40)
-# 48 GB GDDR6, Ampere — comfortable headroom for Q5_K_M
+# 48 GB GDDR6, Ampere -- comfortable headroom for Q5_K_M
 DEFAULT_QUANT="q5_k_m"
 DEFAULT_LOWVRAM="0"
 DEFAULT_RES="1024x1024"
 ;;
 rtx-3090)
-# 24 GB GDDR6X, Ampere — original profile
+# 24 GB GDDR6X, Ampere -- original profile
 DEFAULT_QUANT="q4_k_m"
 DEFAULT_LOWVRAM="0"
 DEFAULT_RES="1024x1024"
@@ -217,7 +217,7 @@ cd "$QWEN_ROOT"
 
 # IMPORTANT: as of huggingface_hub 0.23.0+, "--local-dir" downloads go
 # straight to the target folder with NO cache duplication and NO symlinks
-# (deliberate redesign — see huggingface_hub v0.23.0 release notes).
+# (deliberate redesign -- see huggingface_hub v0.23.0 release notes).
 # "--local-dir-use-symlinks" is deprecated/ignored on modern CLI versions,
 # so it is intentionally NOT passed here. We always pin a floor version
 # below, since skipping the upgrade whenever *some* version is already
@@ -284,15 +284,17 @@ echo " [warn] HF CLI download unavailable or failed for $hf_filename, falling ba
 # (no subprocess spawned), so the secret is never handled by anything
 # other than curl itself, reading its own stdin.
 
+{
 printf 'url = "%s"\n' "$url"
 printf 'output = "%s"\n' "$tmp"
 printf 'fail\nlocation\nretry = 5\nretry-delay = 10\ncontinue-at = -\n'
 if [ -n "${HF_TOKEN:-}" ]; then
 printf 'header = "Authorization: Bearer %s"\n' "$HF_TOKEN"
-fi
+fi 
 } | curl -K -
 mv "$tmp" "$dest"
 fi
+}
 
 # ---------------------------------------------------------------------------
 # Download models only if missing (safe download prevents corrupt partials)
@@ -304,21 +306,21 @@ safe_download \
 "https://huggingface.co/unsloth/Qwen-Image-Edit-2511-GGUF/resolve/main/qwen-image-edit-2511-Q4_K_M.gguf" \
 "ComfyUI/models/diffusion_models/qwen-image-edit-2511-Q4_K_M.gguf"
 
-# Download Q5_K_M if requested (~15 GB) — default for A40, optional for 24 GB cards
+# Download Q5_K_M if requested (~15 GB) -- default for A40, optional for 24 GB cards
 if [ "$QWEN_QUANT" = "q5_k_m" ]; then
 safe_download \
 "https://huggingface.co/unsloth/Qwen-Image-Edit-2511-GGUF/resolve/main/qwen-image-edit-2511-Q5_K_M.gguf" \
 "ComfyUI/models/diffusion_models/qwen-image-edit-2511-Q5_K_M.gguf"
 fi
 
-# Download Q6_K if requested (~16.9 GB) — only viable on 48 GB cards (A40)
+# Download Q6_K if requested (~16.9 GB) -- only viable on 48 GB cards (A40)
 if [ "$QWEN_QUANT" = "q6_k" ]; then
 safe_download \
 "https://huggingface.co/unsloth/Qwen-Image-Edit-2511-GGUF/resolve/main/qwen-image-edit-2511-Q6_K.gguf" \
 "ComfyUI/models/diffusion_models/qwen-image-edit-2511-Q6_K.gguf"
 fi
 
-# Download Q4_K_S if requested (~12.4 GB) — OOM fallback for 24 GB cards
+# Download Q4_K_S if requested (~12.4 GB) -- OOM fallback for 24 GB cards
 if [ "$QWEN_QUANT" = "q4_k_s" ]; then
 safe_download \
 "https://huggingface.co/unsloth/Qwen-Image-Edit-2511-GGUF/resolve/main/qwen-image-edit-2511-Q4_K_S.gguf" \
