@@ -3,7 +3,7 @@
 # Compatible with start_comfyui.sh-GPU-aware-v3.7.sh.
 #
 # Build example:
-#   docker build -f Dockerfile.qwen-image-edit-runpod-v3.7.dockerfile \
+#   docker build -f Dockerfile.qwen-image-edit-runpod-v3.7.Dockerfile \
 #     -t your-registry/qwen-image-edit:runpod-v3.7 .
 #
 # RunPod configuration:
@@ -12,6 +12,13 @@
 #   - Optional environment variables are documented in the v3.7 guide.
 #   - The start script clones, pins/updates, installs, and downloads models
 #     into /workspace/qwen-edit on first boot.
+#
+# v3.9: added entrypoint.sh, an nvidia-smi-based GPU auto-detect wrapper.
+# QWEN_GPU_PROFILE now defaults to "auto" instead of a fixed profile. If left
+# on "auto" (or unset), entrypoint.sh probes nvidia-smi at container startup
+# and resolves rtx-pro-4000 / a40 / rtx-3090 / custom automatically before
+# handing off to start_comfyui.sh. Setting QWEN_GPU_PROFILE explicitly to any
+# other value on the pod/template still overrides detection completely.
 
 FROM runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404
 
@@ -42,16 +49,19 @@ RUN apt-get update -y \
 # by the attached RunPod Network Volume at runtime.
 COPY --chmod=0755 start_comfyui.sh-GPU-aware-v3.7.sh /opt/start_comfyui.sh
 
+# GPU auto-detect wrapper (v3.9). Runs before start_comfyui.sh.
+COPY --chmod=0755 entrypoint.sh /opt/entrypoint.sh
+
 # ComfyUI is served through RunPod's HTTP proxy on this port.
 EXPOSE 8188
 
-# Choose this at deployment time if needed:
-#   QWEN_GPU_PROFILE=rtx-pro-4000 | a40 | rtx-3090 | custom
-# The 24 GB RTX PRO 4000 profile is a conservative default.
-ENV QWEN_GPU_PROFILE=rtx-pro-4000 \
+# QWEN_GPU_PROFILE=auto triggers nvidia-smi based auto-detection in
+# entrypoint.sh. Override explicitly (rtx-pro-4000 | a40 | rtx-3090 | custom)
+# at the RunPod template/pod level to bypass detection entirely.
+ENV QWEN_GPU_PROFILE=auto \
     QWEN_LOWVRAM=0
 
 # Do not bake HF_TOKEN, model files, a commit pin, or the Network Volume's
 # content into the image. Provide those as RunPod environment variables or
 # persistent-volume state at runtime.
-CMD ["/bin/bash", "/opt/start_comfyui.sh"]
+CMD ["/bin/bash", "/opt/entrypoint.sh"]
