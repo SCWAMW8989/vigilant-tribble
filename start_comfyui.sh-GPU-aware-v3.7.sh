@@ -34,19 +34,19 @@ GPU_PROFILE="${QWEN_GPU_PROFILE:-rtx-pro-4000}"
 
 case "$GPU_PROFILE" in
 rtx-pro-4000)
-# 24 GB GDDR7, Blackwell -- same VRAM budget as RTX 3090
+# 24 GB GDDR7, Blackwell — same VRAM budget as RTX 3090
 DEFAULT_QUANT="q4_k_m"
 DEFAULT_LOWVRAM="0"
 DEFAULT_RES="1024x1024"
 ;;
 a40)
-# 48 GB GDDR6, Ampere -- comfortable headroom for Q5_K_M
+# 48 GB GDDR6, Ampere — comfortable headroom for Q5_K_M
 DEFAULT_QUANT="q5_k_m"
 DEFAULT_LOWVRAM="0"
 DEFAULT_RES="1024x1024"
 ;;
 rtx-3090)
-# 24 GB GDDR6X, Ampere -- original profile
+# 24 GB GDDR6X, Ampere — original profile
 DEFAULT_QUANT="q4_k_m"
 DEFAULT_LOWVRAM="0"
 DEFAULT_RES="1024x1024"
@@ -107,6 +107,43 @@ python3 -m venv --system-site-packages .venv
 fi
 
 # ---------------------------------------------------------------------------
+# Network helpers: some RunPod hosts fail DNS for a while after container
+# start ("Could not resolve host: github.com"). Wait for DNS, fall back to
+# public resolvers, and retry network git operations instead of dying on the
+# first failure (which causes the pod's restart loop).
+# ---------------------------------------------------------------------------
+wait_for_dns() {
+  local host="$1" i
+  for i in $(seq 1 12); do
+    if getent hosts "$host" >/dev/null 2>&1; then
+      return 0
+    fi
+    if [ "$i" = "3" ] && [ -w /etc/resolv.conf ]; then
+      echo " [net] adding public DNS resolvers"
+      printf 'nameserver 1.1.1.1\nnameserver 8.8.8.8\n' >> /etc/resolv.conf
+    fi
+    echo " [net] waiting for DNS ($host), attempt $i/12"
+    sleep 5
+  done
+  echo "ERROR: cannot resolve $host. This host's DNS is broken; stop the pod and redeploy to land on a different host."
+  return 1
+}
+
+retry() {
+  local n=0
+  until "$@"; do
+    n=$((n + 1))
+    if [ "$n" -ge 5 ]; then
+      return 1
+    fi
+    echo " [retry] attempt $n/5 failed: $*"
+    sleep 5
+  done
+}
+
+wait_for_dns github.com
+
+# ---------------------------------------------------------------------------
 # Git sync helper: clones a repo if missing, then checks out an explicit pin
 # when configured. Without a pin it tracks the named upstream branch. Set
 # ALLOW_UPSTREAM_UPDATE=1 to deliberately update a pinned checkout for this
@@ -122,10 +159,10 @@ sync_git_repo() {
   if [ ! -d "$repo_dir/.git" ]; then
     rm -rf "$repo_dir"
     mkdir -p "$(dirname "$repo_dir")"
-    git clone --branch "$branch" "$repo_url" "$repo_dir"
+    retry git clone --branch "$branch" "$repo_url" "$repo_dir"
   fi
 
-  git -C "$repo_dir" fetch --tags --prune origin
+  retry git -C "$repo_dir" fetch --tags --prune origin
 
   if [ -n "$pinned_commit" ] && [ "${ALLOW_UPSTREAM_UPDATE:-0}" != "1" ]; then
     if ! git -C "$repo_dir" cat-file -e "${pinned_commit}^{commit}" 2>/dev/null; then
@@ -136,7 +173,7 @@ sync_git_repo() {
     echo " $label mode    : pinned"
   elif [ "${ALLOW_UPSTREAM_UPDATE:-0}" = "1" ]; then
     git -C "$repo_dir" checkout --quiet "$branch"
-    git -C "$repo_dir" pull --ff-only origin "$branch"
+    retry git -C "$repo_dir" pull --ff-only origin "$branch"
     echo " $label mode    : updated to origin/$branch"
     if [ -n "$pinned_commit" ]; then
       echo " WARNING: The configured pin remains ${pinned_commit}."
@@ -144,7 +181,7 @@ sync_git_repo() {
     fi
   else
     git -C "$repo_dir" checkout --quiet "$branch"
-    git -C "$repo_dir" pull --ff-only origin "$branch"
+    retry git -C "$repo_dir" pull --ff-only origin "$branch"
     echo " $label mode    : tracking origin/$branch"
   fi
 
@@ -195,11 +232,16 @@ echo " ComfyUI-GGUF  : $CURRENT_GGUF_COMMIT"
 # ---------------------------------------------------------------------------
 python - <<'PY'
 import torch
+
 print("torch:", torch.__version__, "cuda:", torch.version.cuda,
-"cuda_available:", torch.cuda.is_available())
+      "cuda_available:", torch.cuda.is_available())
+
 if not torch.cuda.is_available():
-raise SystemExit("CUDA is not available in torch. Use the official "
-"RunPod PyTorch template or fix the torch install.")
+    raise SystemExit(
+        "CUDA is not available in torch. Use the official "
+        "RunPod PyTorch template or fix the torch install."
+    )
+
 print("gpu:", torch.cuda.get_device_name(0))
 PY
 
@@ -217,7 +259,7 @@ cd "$QWEN_ROOT"
 
 # IMPORTANT: as of huggingface_hub 0.23.0+, "--local-dir" downloads go
 # straight to the target folder with NO cache duplication and NO symlinks
-# (deliberate redesign -- see huggingface_hub v0.23.0 release notes).
+# (deliberate redesign — see huggingface_hub v0.23.0 release notes).
 # "--local-dir-use-symlinks" is deprecated/ignored on modern CLI versions,
 # so it is intentionally NOT passed here. We always pin a floor version
 # below, since skipping the upgrade whenever *some* version is already
@@ -283,14 +325,13 @@ echo " [warn] HF CLI download unavailable or failed for $hf_filename, falling ba
 # token never appears in argv/ps/proc-cmdline. "printf" is a bash builtin
 # (no subprocess spawned), so the secret is never handled by anything
 # other than curl itself, reading its own stdin.
-
 {
 printf 'url = "%s"\n' "$url"
 printf 'output = "%s"\n' "$tmp"
 printf 'fail\nlocation\nretry = 5\nretry-delay = 10\ncontinue-at = -\n'
 if [ -n "${HF_TOKEN:-}" ]; then
 printf 'header = "Authorization: Bearer %s"\n' "$HF_TOKEN"
-fi 
+fi
 } | curl -K -
 mv "$tmp" "$dest"
 fi
@@ -299,6 +340,7 @@ fi
 # ---------------------------------------------------------------------------
 # Download models only if missing (safe download prevents corrupt partials)
 # ---------------------------------------------------------------------------
+wait_for_dns huggingface.co
 echo "--- Downloading models (quant: $QWEN_QUANT) ---"
 
 # Always download Q4_K_M as the baseline diffusion model (~13.2 GB)
@@ -306,21 +348,21 @@ safe_download \
 "https://huggingface.co/unsloth/Qwen-Image-Edit-2511-GGUF/resolve/main/qwen-image-edit-2511-Q4_K_M.gguf" \
 "ComfyUI/models/diffusion_models/qwen-image-edit-2511-Q4_K_M.gguf"
 
-# Download Q5_K_M if requested (~15 GB) -- default for A40, optional for 24 GB cards
+# Download Q5_K_M if requested (~15 GB) — default for A40, optional for 24 GB cards
 if [ "$QWEN_QUANT" = "q5_k_m" ]; then
 safe_download \
 "https://huggingface.co/unsloth/Qwen-Image-Edit-2511-GGUF/resolve/main/qwen-image-edit-2511-Q5_K_M.gguf" \
 "ComfyUI/models/diffusion_models/qwen-image-edit-2511-Q5_K_M.gguf"
 fi
 
-# Download Q6_K if requested (~16.9 GB) -- only viable on 48 GB cards (A40)
+# Download Q6_K if requested (~16.9 GB) — only viable on 48 GB cards (A40)
 if [ "$QWEN_QUANT" = "q6_k" ]; then
 safe_download \
 "https://huggingface.co/unsloth/Qwen-Image-Edit-2511-GGUF/resolve/main/qwen-image-edit-2511-Q6_K.gguf" \
 "ComfyUI/models/diffusion_models/qwen-image-edit-2511-Q6_K.gguf"
 fi
 
-# Download Q4_K_S if requested (~12.4 GB) -- OOM fallback for 24 GB cards
+# Download Q4_K_S if requested (~12.4 GB) — OOM fallback for 24 GB cards
 if [ "$QWEN_QUANT" = "q4_k_s" ]; then
 safe_download \
 "https://huggingface.co/unsloth/Qwen-Image-Edit-2511-GGUF/resolve/main/qwen-image-edit-2511-Q4_K_S.gguf" \
