@@ -266,8 +266,13 @@ cd "$QWEN_ROOT"
 # importable could otherwise leave a pre-0.23 install in place that still
 # exhibits the old cache+local_dir duplication behavior.
 # ---------------------------------------------------------------------------
-echo "Ensuring huggingface_hub[cli] >= 0.23 (+ hf_transfer) for accelerated, non-duplicating downloads..."
-pip install -q -U "huggingface_hub[cli]>=0.23.0,<1.0.0" hf_transfer
+echo "Ensuring huggingface_hub >= 1.5 (required by ComfyUI's transformers; ships the hf CLI)..."
+# Do NOT cap this below 1.0: current ComfyUI requires transformers, which needs
+# huggingface_hub>=1.5,<2.0. A <1.0 cap downgrades the shared venv and breaks
+# "import transformers" (ImportError: is_offline_mode). Unconditional so an
+# already-downgraded venv on the volume repairs itself on the next boot.
+pip install -q "huggingface_hub>=1.5.0,<2.0"
+pip install -q hf_transfer || true
 export HF_HUB_ENABLE_HF_TRANSFER=1
 HF_DL_TMP="$QWEN_ROOT/.hf_dl_tmp"
 mkdir -p "$HF_DL_TMP"
